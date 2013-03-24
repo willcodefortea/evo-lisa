@@ -1,0 +1,54 @@
+<!DOCTYPE>
+<html>
+    <head>
+        <link href="./styles.css" rel="stylesheet" type="text/css">
+        <script src="./evo.js"></script>
+        <script src="./jquery-latest.js" ></script>
+    </head>
+    <body>
+        <div id="container">
+            <img id="target" src="./mona.jpg" />
+            <canvas id="c" ></canvas>
+
+            <div id="controls">
+                FITNESS: <span id="fitness">###</span>
+                <ul>
+                    <li><a href="javascript:void(0);" id="start">Start</a></li>
+                    <li><a href="javascript:void(0);" id="add_poly">Add polygon</a></li>
+                </ul>
+            </div>
+        </div>
+
+
+        <script type="text/javascript">
+            var go = function() {
+                var t = document.getElementById('target'),
+                    c = document.getElementById('c'),
+                    f = document.getElementById('fitness'),
+                    evoLisa = new EvoLisa(t, c, f);
+                    return evoLisa;
+            }
+
+            var start = document.getElementById('start');
+
+            var evoLisa;
+            start.onclick = function() {
+                evoLisa = go();
+                evoLisa.start();
+            };
+
+            // setup testing mutations
+            var add_poly = document.getElementById('add_poly');
+
+            add_poly.onclick = function() {
+                if (typeof evoLisa == "undefined") {
+                    evoLisa = go();
+                    evoLisa.start();
+                }
+
+                evoLisa.dna.addPolygon();
+                evoLisa.draw();
+            };
+        </script>
+    </body>
+</html>

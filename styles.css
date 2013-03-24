@@ -1,0 +1,16 @@
+#c {
+    border: 1px black solid;
+    width: 200px;
+    height: 200px;
+}
+
+#container {
+    position: relative;
+}
+
+#controls {
+    display: inline-block;
+    position: absolute;
+    top: 0px;
+    padding-left: 15px;
+}
