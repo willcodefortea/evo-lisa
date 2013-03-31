@@ -9,8 +9,8 @@ var EvoLisa = function(target, canvas, fitness) {
     this.c.height = this.c.style.height = this.t.height;
 
     this.settings = {
-        "max_polygon": 20,
-        "max_polygon_points": 5,
+        "max_polygon": 255,
+        "max_polygon_points": 8,
         "max_width": this.t.width,
         "max_height": this.t.height,
     };
@@ -60,7 +60,16 @@ EvoLisa.prototype.outputFitness = function() {
     "use strict"
     this.f.innerHTML = this.dna.fitness(this.tData);
 };
+/*******************************************************************************
 
+*/
+
+var Mutation = function(probability, mutate, isValid) {
+    this.probability = probability;
+    this.mutate = mutate;
+    this.isValid = isValid;
+    this.index = undefined;
+}
 
 /*******************************************************************************
 
@@ -74,9 +83,16 @@ var Dna = function (settings) {
     this.max_height = settings["max_height"];
 
     this.dnaMutations = [
-        [1/700, Dna.prototype.addPolygon, Dna.prototype.addPolygon_valid],
-        [1/1500, Dna.prototype.removePolygon, Dna.prototype.removePolygon_valid],
-        [1/700, Dna.prototype.movePolygon, Dna.prototype.movePolygon_valid]
+        new Mutation(1/700, Dna.prototype.addPolygon, Dna.prototype.addPolygon_valid),
+        new Mutation(1/1500, Dna.prototype.removePolygon, Dna.prototype.removePolygon_valid),
+        new Mutation(1/700, Dna.prototype.movePolygon, Dna.prototype.movePolygon_valid)
+    ];
+
+    this.polygonMutations = [
+        new Mutation(1/700, Dna.prototype.recolour, Dna.prototype.recolour_valid),
+        new Mutation(1/1500, Dna.prototype.addPoint, Dna.prototype.addPoint_valid),
+        new Mutation(1/1500, Dna.prototype.removePoint, Dna.prototype.removePoint_valid),
+        new Mutation(1/1500, Dna.prototype.movePoint, Dna.prototype.movePoint_valid)
     ];
 };
 
@@ -127,41 +143,30 @@ Dna.prototype.fitness = function(tData) {
 };
 
 Dna.prototype.mutate = function() {
-    var valid_dna_mutations = [];
-
+    /*
+        Mutate our dna!
+    */
+    "use strict"
     // clear the cached fitness
     this.fit = undefined;
 
-    for (var i=0; i<this.dnaMutations.length; i++) {
-        if (this.dnaMutations[i][2].apply(this))
-            valid_dna_mutations.push(this.dnaMutations[i]);
-    }
-    var allMutations = utils.permutations(valid_dna_mutations);
-    var upperLim = 0
-    for (var i=0; i<allMutations.length; i++) {
-        var lim = 1;
-        for (var j=0; j<allMutations[i].length; j++)
-            lim *= allMutations[i][j][0];
-        upperLim += lim;
-    }
-
-    var rand = Math.random() * upperLim;
-
-    var current_lim = 0;
-
-    for (var i=0; i<allMutations.length; i++) {
-        var lim = 1;
-        for (var j=0; j<allMutations[i].length; j++)
-            lim *= allMutations[i][j][0];
-
-        current_lim += lim;
-
-        if (current_lim > rand) {
-            for (var j=0; j<allMutations[i].length; j++) {
-                allMutations[i][j][1].apply(this, [allMutations[i][j][4]]);
+    var mutated = false;
+    while (!mutated) {
+        this.dnaMutations.forEach(function(mutation) {
+            if (Math.random() < mutation.probability && mutation.isValid.apply(this)) {
+                mutated = true;
+                mutation.mutate.apply(this);
             }
-            break;
-        }
+        }, this)
+
+        this.dna.forEach(function(chromosone, index) {
+            this.polygonMutations.forEach(function(mutation) {
+                if (Math.random() < mutation.probability && mutation.isValid.apply(this, [index])) {
+                    mutated = true;
+                    mutation.mutate.apply(this, [index]);
+                }
+            }, this);
+        }, this)
     }
 };
 
@@ -227,6 +232,74 @@ Dna.prototype.movePolygon_valid = function() {
     */
     "use strict"
     return this.dna.length >= 2;
+};
+
+Dna.prototype.recolour = function(index) {
+    /*
+        recolour a polygon
+    */
+    "use strict"
+    this.dna[index].color = utils.randomColorAlpha(Math.random());
+};
+
+Dna.prototype.recolour_valid = function() {
+    /*
+        only case we can't recolour is when we don't actually have any polygons 
+    */
+    return this.dna.length > 0;
+};
+
+Dna.prototype.addPoint = function(index) {
+    /*
+        move a point to the polygon at the given index
+    */
+    "use strict"
+    var p = new Point().random(this.max_width, this.max_height);
+    this.dna[index].addPoint(p);
+};
+
+Dna.prototype.addPoint_valid = function(index) {
+    /*
+        can we add a point to the polygon at the given index? 
+    */
+    if (this.dna.length > 0)
+        return this.dna[index] < this.max_polygon_points;
+    return false;
+};
+
+Dna.prototype.removePoint = function(index) {
+    /*
+        remove a random point
+    */
+    "use strict"
+    this.dna[index].points.splice(utils.random(this.dna[index].points.length), 1);
+};
+
+Dna.prototype.removePoint_valid = function(index) {
+    /*
+        can we remove a point?
+    */
+    "use strict"
+    if (this.dna.length > 0)
+        return this.dna[index].points.length > 3;
+    return false;
+};
+
+Dna.prototype.movePoint = function(index) {
+    /*
+        Give a random point new coords
+    */
+    "use strict"
+    var point_index = utils.random(this.dna[index].points.length);
+    this.dna[index].points[point_index].x = utils.random(this.max_width);
+    this.dna[index].points[point_index].y = utils.random(this.max_height);
+};
+
+Dna.prototype.movePoint_valid = function() {
+    /*
+        Only invalid when we have no polygons
+    */
+    return this.dna.length > 0;
 };
 
 
@@ -340,22 +413,5 @@ var utils = {
             return out;
         }
         return obj;
-    },
-    permutations: function(list) {
-        var combinations = []; //All combinations
-        var combination = [];  //Single combination
-        var quantity = (1 << list.length);
-        for (var i = 0; i < quantity ; i++){
-            combination = [];
-            for (var j=0;j<list.length;j++) {
-                if ((i & (1 << j))){ 
-                    combination.push(list[j]);
-                }
-            }
-            if (combination.length !== 0) {
-                combinations.push(combination);
-            }
-        }
-        return combinations;
     }
 };
