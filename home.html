@@ -12,6 +12,7 @@
 
             <div id="controls">
                 FITNESS: <span id="fitness">###</span>
+                GEN: <span id="generation">###</span>
                 <ul>
 
                     <li><a href="javascript:void(0);" id="step">Step</a></li>
@@ -19,27 +20,60 @@
                     <li><a href="javascript:void(0);" id="add_poly">Add polygon</a></li>
                 </ul>
             </div>
+
+            <div id="display"></div>
         </div>
 
 
         <script type="text/javascript">
             var go = function() {
                 var t = document.getElementById('target'),
-                    c = document.getElementById('c'),
-                    f = document.getElementById('fitness'),
-                    evoLisa = new EvoLisa(t, c, f);
+                    c = document.getElementById('c')
+                    evoLisa = new EvoLisa(t, c);
                     return evoLisa;
             }
 
             var evoLisa;
             var start = document.getElementById('start');
+            var display = document.getElementById('display');
+
             start.onclick = function() {
                 evoLisa = go();
-                evoLisa.start();
+                console.log(evoLisa.tData)
+                var initialFitness = evoLisa.dna.fitness(evoLisa.tData),
+                    displayEveryPercentage = 0.05,
+                    currentPercentage = 1,
+                    fitOutput = document.getElementById('fitness'),
+                    genOutput = document.getElementById('generation');
+
+
+                var displayEvolution = function(evo) {
+                    var d = document.createElement('div'),
+                        c = document.createElement('canvas');
+
+                    c.width = evoLisa.t.width;
+                    c.height = evoLisa.t.height;
+                    c.style.width = c.width * 4/5
+                    c.style.height = c.height * 4/5
+                    evo.draw(c);
+                    d.className = "container"
+                    d.innerHTML = "<div id='info'>g: " + evoLisa.generation + "<br/>f: " + evoLisa.dna.fitness(evoLisa.tData) + "</div>"
+                    d.appendChild(c);
+                    display.appendChild(d);
+                };
 
                 var steps = function() {
                     for (var i=0; i<100; i++)
                         evoLisa.step();
+
+                    fitOutput.innerHTML = evoLisa.dna.fitness(evoLisa.tData);
+                    genOutput.innerHTML = evoLisa.generation;
+                    
+                    if (evoLisa.dna.fitness(evoLisa.tData) / initialFitness < currentPercentage) {
+                        displayEvolution(evoLisa);
+                        currentPercentage -= displayEveryPercentage;
+                    }
+
                     setTimeout(steps, 50)
                 }
                 steps();
@@ -50,7 +84,6 @@
             step.onclick = function() {
                 if (typeof evoLisa == "undefined") {
                     evoLisa = go();
-                    evoLisa.start();
                 }
                 for (var i=0; i<250; i++)
                     evoLisa.step();

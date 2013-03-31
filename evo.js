@@ -1,8 +1,7 @@
-var EvoLisa = function(target, canvas, fitness) {
+var EvoLisa = function(target, canvas) {
     "use strict"
     this.t = target;    // image we're mutating towards
     this.c = canvas;    // canva we're drawing on
-    this.f = fitness;   // span to display fitness
 
     // ensure our canvas matches the target
     this.c.width = this.c.style.width = this.t.width;
@@ -12,21 +11,13 @@ var EvoLisa = function(target, canvas, fitness) {
         "max_polygon": 255,
         "max_polygon_points": 8,
         "max_width": this.t.width,
-        "max_height": this.t.height,
+        "max_height": this.t.height
     };
 
+    this.tData = utils.getImagePixelData(this.t);
     this.dna = new Dna(this.settings);
     this.generation = 0;
-    this.tData = utils.getImagePixelData(this.t);
 };
-
-EvoLisa.prototype.start = function() {
-    /*
-        entry point for evolution
-    */
-    "use strict"
-};
-
 
 EvoLisa.prototype.step = function() {
     /*
@@ -44,22 +35,17 @@ EvoLisa.prototype.step = function() {
     this.generation++;
 };
 
-EvoLisa.prototype.draw = function() {
+EvoLisa.prototype.draw = function(c) {
     /*
         Ouput our dna to our canvas
     */
     "use strict"
-    this.dna.draw(this.c);
-    this.outputFitness();
+    if (typeof c == "undefined")
+        this.dna.draw(this.c);
+    else
+        this.dna.draw(c);
 };
 
-EvoLisa.prototype.outputFitness = function() {
-    /*
-        Ouput fitness to user
-    */
-    "use strict"
-    this.f.innerHTML = this.dna.fitness(this.tData);
-};
 /*******************************************************************************
 
 */
