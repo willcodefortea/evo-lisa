@@ -27,13 +27,13 @@ EvoLisa.prototype.start = function(callback) {
     "use strict"
     this.dna.mutate();
     var self = this;
-    this.dna.step(this.tData, function() {
+    this.dna.fitness_workers(this.tData, function() {
         self.initialFitness = this.fit;
-        self.step(callback);
+        self.step_workers(callback);
     });
 };
 
-EvoLisa.prototype.step = function(callback) {
+EvoLisa.prototype.step_workers = function(callback) {
     /*
         Step function for web workes, sets up call backs
     */
@@ -53,6 +53,26 @@ EvoLisa.prototype.step = function(callback) {
 
         self.step_workers(callback);
     });
+};
+
+EvoLisa.prototype.step = function() {
+    /*
+        Each step allows for a mutation
+    */
+    "use strict"
+    var child = utils.deepCopy(this.dna);
+    child.mutate();
+
+
+    if (child.fitness(this.tData) < this.dna.fitness(this.tData)) {
+        this.dna = child;
+        this.draw();
+    }
+
+    if (this.generation == 0)
+        this.initialFitness = this.dna.fitness(this.tData);
+
+    this.generation++;
 };
 
 EvoLisa.prototype.draw = function(c) {
