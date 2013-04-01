@@ -9,30 +9,50 @@ var EvoLisa = function(target, canvas) {
 
     this.settings = {
         "max_polygon": 255,
-        "max_polygon_points": 8,
+        "max_polygon_points": 10,
         "max_width": this.t.width,
         "max_height": this.t.height
     };
 
     this.tData = utils.getImagePixelData(this.t);
     this.dna = new Dna(this.settings);
+
     this.generation = 0;
 };
 
-EvoLisa.prototype.step = function() {
+EvoLisa.prototype.start = function(callback) {
     /*
-        Each step allows for a mutation
+        Entry point for evolution with web workers
     */
     "use strict"
+    this.dna.mutate();
+    var self = this;
+    this.dna.step(this.tData, function() {
+        self.initialFitness = this.fit;
+        self.step(callback);
+    });
+};
 
+EvoLisa.prototype.step = function(callback) {
+    /*
+        Step function for web workes, sets up call backs
+    */
     var child = utils.deepCopy(this.dna);
     child.mutate();
+    var self = this;
 
-    if (child.fitness(this.tData) < this.dna.fitness(this.tData)) {
-        this.dna = child;
-        this.draw();
-    }
-    this.generation++;
+    child.fitness_workers(this.tData, function() {
+        if (child.fit < self.dna.fit) {
+            self.dna = child;
+            self.draw();
+        }
+        self.generation++;
+
+        if (typeof callback == "function")
+                callback();
+
+        self.step_workers(callback);
+    });
 };
 
 EvoLisa.prototype.draw = function(c) {
@@ -70,15 +90,18 @@ var Dna = function (settings) {
 
     this.dnaMutations = [
         new Mutation(1/700, Dna.prototype.addPolygon, Dna.prototype.addPolygon_valid),
-        new Mutation(1/1500, Dna.prototype.removePolygon, Dna.prototype.removePolygon_valid),
-        new Mutation(1/700, Dna.prototype.movePolygon, Dna.prototype.movePolygon_valid)
+        new Mutation(1/700, Dna.prototype.movePolygon, Dna.prototype.movePoint_valid),
+        new Mutation(1/1500, Dna.prototype.removePolygon, Dna.prototype.removePolygon_valid)
     ];
 
     this.polygonMutations = [
-        new Mutation(1/700, Dna.prototype.recolour, Dna.prototype.recolour_valid),
         new Mutation(1/1500, Dna.prototype.addPoint, Dna.prototype.addPoint_valid),
         new Mutation(1/1500, Dna.prototype.removePoint, Dna.prototype.removePoint_valid),
-        new Mutation(1/1500, Dna.prototype.movePoint, Dna.prototype.movePoint_valid)
+        new Mutation(1/1500, Dna.prototype.movePoint, Dna.prototype.movePoint_valid),
+        new Mutation(1/1500, Dna.prototype.recolourRed, Dna.prototype.recolour_valid),
+        new Mutation(1/1500, Dna.prototype.recolourGreen, Dna.prototype.recolour_valid),
+        new Mutation(1/1500, Dna.prototype.recolourBlue, Dna.prototype.recolour_valid),
+        new Mutation(1/1500, Dna.prototype.recolourAlpha, Dna.prototype.recolour_valid)
     ];
 };
 
@@ -91,6 +114,151 @@ Dna.prototype.draw = function(c) {
     ctx.clearRect(0, 0, c.width, c.height);
     for (var i=0; i<this.dna.length; i++)
         this.dna[i].draw(c);
+};
+
+Dna.prototype.getFitnessWorker = function() {
+    /*
+        To speed up the fitness function we can split the data to multiple workers
+    */
+    "use strict"
+    var blob = new Blob([
+        "                                                               \
+        self.onmessage = function(e) {                                  \
+            var fit = 0,                                                \
+                p = 0,                                                  \
+                numParitions = e.data.numParitions,                     \
+                partition = e.data.partition,                           \
+                stepSize = 4 * (numParitions / 3);                      \
+            for (var i=partition; i<e.data.tData.length; i+=stepSize) { \
+                p = e.data.tData[i] - e.data.cData[i];                  \
+                fit += p*p;                                             \
+            }                                                           \
+            self.postMessage({fit: fit});                               \
+        }                                                               \
+        "
+    ]);
+    var blobURL = window.URL.createObjectURL(blob);
+    return new Worker(blobURL);
+};
+
+Dna.prototype.getFitnessWorker_basic = function() {
+    /*
+        To speed up the fitness function we can split the data to multiple workers
+    */
+    "use strict"
+    var blob = new Blob([
+        "                                                               \
+        self.onmessage = function(e) {                                  \
+            var fit = 0,                                                \
+                p = 0,                                                  \
+                cData = e.data.cData,                                   \
+                tData = e.data.tData;                                   \
+            for (var i=0; i<cData.length; i+=4) {                       \
+                var r = tData[i] - cData[i];                            \
+                var g = tData[i+1] - cData[i+1];                        \
+                var b = tData[i+2] - cData[i+2];                        \
+                fit += r*r + g*g + b*b;                                 \
+            }                                                           \
+            self.postMessage({fit: fit});                               \
+        }                                                               \
+        "
+    ]);
+    var blobURL = window.URL.createObjectURL(blob);
+    return new Worker(blobURL);
+};
+
+var WORKERS = undefined;
+
+Dna.prototype.fitness_workers = function(tData, workersComplete) {
+    /*
+
+    */
+    var NUM_WORKERS = 3,
+        self = this;
+
+    this.workersWaiting = NUM_WORKERS;
+
+    if (typeof WORKERS === "undefined") {
+        WORKERS = [];
+        for (var i=0; i<NUM_WORKERS; i++) {
+            var w = this.getFitnessWorker()
+            WORKERS.push(w);
+        }
+    }
+
+    max = 0;
+
+    WORKERS.forEach(function(worker) {
+        worker.onmessage = function(e) {
+            self.workersWaiting--;
+            self.fit = self.fit ? self.fit + e.data.fit : e.data.fit;
+            var delta = new Date().getTime() - e.data.y;
+            if (delta > max) {
+                max = delta
+                //console.log(max);
+            }
+
+            if (self.workersWaiting == 0) {
+                if (typeof workersComplete === "function")
+                    workersComplete.apply(self);
+            }
+        };
+    });
+
+    var c = document.createElement('canvas');
+    c.width = c.style.width = this.max_width;
+    c.height = c.style.height = this.max_height;
+
+    this.draw(c);
+
+    var ctx = c.getContext('2d'),
+        fit = 0,
+        cData = ctx.getImageData(0, 0, this.max_width, this.max_height).data;
+
+    // pass the full set of data to each worker, they can then sort through which segment they're doing
+    for (var i=0; i<NUM_WORKERS; i++) {
+        data = {tData: tData, cData: cData, partition: i, numParitions: NUM_WORKERS};
+        WORKERS[i].postMessage(data);
+    }
+};
+
+Dna.prototype.fitness_workers_basic = function(tData, workersComplete) {
+    var NUM_WORKERS = 1,
+        self = this;
+
+    this.workersWaiting = NUM_WORKERS;
+
+    if (typeof WORKERS === "undefined") {
+        WORKERS = [];
+        for (var i=0; i<NUM_WORKERS; i++) {
+            var w = this.getFitnessWorker()
+            WORKERS.push(w);
+        }
+    }
+
+    WORKERS.forEach(function(worker) {
+        worker.onmessage = function(e) {
+            self.workersWaiting--;
+            self.fit = self.fit ? self.fit + e.data.fit : e.data.fit;
+            if (self.workersWaiting == 0) {
+                if (typeof workersComplete === "function")
+                    workersComplete.apply(self);
+            }
+        };
+    });
+
+    var c = document.createElement('canvas');
+    c.width = c.style.width = this.max_width;
+    c.height = c.style.height = this.max_height;
+
+    this.draw(c);
+
+    var ctx = c.getContext('2d');
+    var fit = 0;
+    var cData = ctx.getImageData(0, 0, this.max_width, this.max_height).data;
+
+    data = {tData: tData, cData: cData};
+    WORKERS[0].postMessage(data);
 };
 
 Dna.prototype.fitness = function(tData) {
@@ -121,7 +289,7 @@ Dna.prototype.fitness = function(tData) {
         var b = tData[i+2] - cData[i+2];
 
         //the fourth element represents alpha, which we don't care about
-        
+
         fit += r*r + g*g + b*b;
     }
     this.fit = fit;
@@ -139,24 +307,28 @@ Dna.prototype.mutate = function() {
     var mutated = false;
     while (!mutated) {
         this.dnaMutations.forEach(function(mutation) {
-            if (Math.random() < mutation.probability && mutation.isValid.apply(this)) {
-                mutated = true;
-                mutation.mutate.apply(this);
+            if (mutation.isValid.apply(this)) {
+                if (Math.random() < mutation.probability) {
+                    mutated = true;
+                    mutation.mutate.apply(this);
+                }
             }
         }, this)
 
         this.dna.forEach(function(chromosone, index) {
             this.polygonMutations.forEach(function(mutation) {
-                if (Math.random() < mutation.probability && mutation.isValid.apply(this, [index])) {
-                    mutated = true;
-                    mutation.mutate.apply(this, [index]);
+                if (mutation.isValid.apply(this, [index])) {
+                    if (Math.random() < mutation.probability) {
+                        mutated = true;
+                        mutation.mutate.apply(this, [index]);
+                    }
                 }
             }, this);
         }, this)
     }
 };
 
-Dna.prototype.addPolygon = function(index) {
+Dna.prototype.addPolygon = function() {
     /*
         Adds a randomly generated polygon to our DNA, either at specified index or at the end
     */
@@ -170,10 +342,8 @@ Dna.prototype.addPolygon = function(index) {
 
     poly.color = utils.randomColorAlpha(Math.random()); // randomize alpha too?
 
-    if (typeof index == "undefined")
-        this.dna.push(poly);
-    else
-        this.dna.splice(index, 0, poly);
+    var index = utils.random(this.dna.length);
+    this.dna.splice(index, 0, poly);
 }
 
 Dna.prototype.addPolygon_valid = function() {
@@ -181,8 +351,28 @@ Dna.prototype.addPolygon_valid = function() {
         Can a polygon be added to our dna?
     */
     "use strict"
-    return this.dna.length < this.max_polygon; 
-} 
+    return this.dna.length < this.max_polygon;
+}
+
+Dna.prototype.movePolygon = function() {
+    /*
+        randomly pick a polygon and move it somewhere else in the dna string
+    */
+    "use strict"
+    var index = utils.random(this.dna.length),
+        poly = this.dna.splice(index, 1)[0];
+    index = utils.random(this.dna.length );
+    this.dna.splice(index, 0, poly);
+};
+
+Dna.prototype.movePolygon_valid = function(dna, settings) {
+    /*
+        Remvoes a polygon from a given index
+    */
+    "use strict"
+    return dna.length > 1;
+};
+
 
 Dna.prototype.removePolygon = function(index) {
     /*
@@ -200,39 +390,62 @@ Dna.prototype.removePolygon_valid = function() {
     return this.dna.length > 0;
 };
 
-Dna.prototype.movePolygon = function() {
-    /*
-        randomly pick a polygon and move it somewhere else in the dna string
-    */
-    "use strict"
-    var index = utils.random(this.dna.length),
-        poly = this.dna.splice(index, 1)[0];
-
-    index = utils.random(this.dna.length);
-    this.dna.splice(index, 0, poly);
-};
-
-Dna.prototype.movePolygon_valid = function() {
-    /*
-        can a polygon be moved?
-    */
-    "use strict"
-    return this.dna.length >= 2;
-};
-
-Dna.prototype.recolour = function(index) {
-    /*
-        recolour a polygon
-    */
-    "use strict"
-    this.dna[index].color = utils.randomColorAlpha(Math.random());
-};
-
 Dna.prototype.recolour_valid = function() {
     /*
         only case we can't recolour is when we don't actually have any polygons 
     */
     return this.dna.length > 0;
+};
+
+Dna.prototype.recolourRGBA = function(index, part) {
+    /*
+        change a portion of our color
+    */
+    "use strict"
+    var color = this.dna[index].color,
+        rgb = color.substring(4, color.length-1)
+         .replace(/ /g, '')
+         .split(','),
+        replacement = 0;
+    if (part == 3)
+        replacement = Math.random();
+    else
+        replacement = utils.random(255);
+
+    rgb[part] = replacement;
+    this.dna[index].color = "rgba(" + rgb.join(",") + ")";
+}
+
+Dna.prototype.recolourRed = function(index) {
+    /*
+        recolour red
+    */
+    "use strict"
+    this.recolourRGBA(index, 0);
+};
+
+Dna.prototype.recolourGreen = function(index) {
+    /*
+        recolour green
+    */
+    "use strict"
+    this.recolourRGBA(index, 1);
+};
+
+Dna.prototype.recolourBlue = function(index) {
+    /*
+        recolour blue
+    */
+    "use strict"
+    this.recolourRGBA(index, 2);
+};
+
+Dna.prototype.recolourAlpha = function(index) {
+    /*
+        recolour alpha
+    */
+    "use strict"
+    this.recolourRGBA(index, 3);
 };
 
 Dna.prototype.addPoint = function(index) {
@@ -312,7 +525,7 @@ Point.prototype.random = function(x, y) {
 
 var Polygon = function() {
     /*
-    
+        Polygon constructor
     */
     "use strict"
     this.points = [];
@@ -399,5 +612,17 @@ var utils = {
             return out;
         }
         return obj;
+    },
+    getNElements: function(arr, n) {
+        if ( n === 1 ) return arr.slice();
+        var i, j,
+            len = arr.length,
+            ret = [];
+        for ( i = 0; i < n; i++ ) {
+            for ( j = i; j < len; j += n ) {
+                ret.push( arr[ j ] );
+            }
+        }
+        return ret;
     }
 };
