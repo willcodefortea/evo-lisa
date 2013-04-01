@@ -11,15 +11,31 @@
             <canvas id="c" ></canvas>
 
             <div id="controls">
-                FITNESS: <span id="fitness">###</span>
-                GEN: <span id="generation">###</span>
+                <div class="info">
+                    <table>
+                        <tr>
+                            <td>FITNESS:</td><td><span id="fitness">0</span></td>
+                        </tr>
+                        <tr>
+                            <td>GEN:</td><td><span id="generation">0</span></td>
+                        </tr>
+                        <tr>
+                            <td>POLYGONS:</td><td><span id="polygons">0</span></td>
+                        </tr>
+                    </table>
+                </div>
+                <br/>
                 <ul>
-
-                    <li><a href="javascript:void(0);" id="step">Step</a></li>
                     <li><a href="javascript:void(0);" id="start">Start</a></li>
-                    <li><a href="javascript:void(0);" id="workers">Workers</a></li>
-                    <li><a href="javascript:void(0);" id="add_poly">Add polygon</a></li>
+                    <li><a href="javascript:void(0);" id="stop">Stop</a></li>
+                    <li><a href="javascript:void(0);" id="reset">Reset</a></li>
                 </ul>
+            </div>
+
+            <div id="info">
+                <p>A bit of fun with genetic programming porting EvoLisa to javascript.</p>
+                <p>An inline web worker is deployed to calculate the fitness, more for a responsive ui than a performance increase.</p>
+                <p>The image data is also given inline, to prevent all those nasty XSS exceptions.</p>
             </div>
 
             <div id="display"></div>
@@ -27,97 +43,74 @@
 
 
         <script type="text/javascript">
+            var numSnapshots = 20,
+                currSnapshot = 1,
+                currentPercentage = undefined,
+                firstGeneration = true,
+                fitOutput = document.getElementById('fitness'),
+                genOutput = document.getElementById('generation'),
+                polyOutput = document.getElementById('polygons');
+
+
+            var displayEvolution = function(evo, startTime) {
+                var d = document.createElement('div'),
+                    c = document.createElement('canvas'),
+                    display = document.getElementById('display');
+
+                c.width = evoLisa.t.width;
+                c.height = evoLisa.t.height;
+                c.style.width = c.width * 3/5 + "px";
+                c.style.height = c.height * 3/5 + "px";
+                evo.draw(c);
+                d.className = "container";
+                var gen = evoLisa.generation,
+                    fit = evoLisa.dna.fit,
+                    timeTaken = new Date().getTime() - startTime;
+                d.innerHTML = "<div class='info'>g: " + gen + "<br/>f: " + fit + "<br />t: " + timeTaken + "</div>";
+                d.appendChild(c);
+                display.appendChild(d);
+            };
+
             var go = function() {
                 var t = document.getElementById('target'),
                     c = document.getElementById('c'),
                     evoLisa = new EvoLisa(t, c);
                     return evoLisa;
             }
-            var displayEveryPercentage = 0.05,
-                currentPercentage = 1,
-                fitOutput = document.getElementById('fitness'),
-                genOutput = document.getElementById('generation');
 
+            var evoLisa,
+                start = document.getElementById('start'),
+                stop = document.getElementById('stop'),
+                reset = document.getElementById('reset');
 
-            var displayEvolution = function(evo, startTime) {
-                var d = document.createElement('div'),
-                    c = document.createElement('canvas');
-
-                c.width = evoLisa.t.width;
-                c.height = evoLisa.t.height;
-                c.style.width = c.width * 4/5;
-                c.style.height = c.height * 4/5;
-                evo.draw(c);
-                d.className = "container";
-                var gen = evoLisa.generation,
-                    fit = evoLisa.dna.fitness(evoLisa.tData),
-                    timeTaken = new Date().getTime() - startTime;
-                d.innerHTML = "<div id='info'>g: " + gen + "<br/>f: " + fit + "<br />t: " + timeTaken + "</div>";
-                d.appendChild(c);
-                display.appendChild(d);
-            };
-
-
-            var evoLisa;
-            var start = document.getElementById('start');
-            var display = document.getElementById('display');
-
+            // set up our buttons
             start.onclick = function() {
-                evoLisa = go();
-                startTime = new Date().getTime()
-                console.log(evoLisa.tData)
-               
-                var steps = function() {
-                    for (var i=0; i<100; i++)
-                        evoLisa.step();
+                if (typeof evoLisa === "undefined")
+                    evoLisa = go();
 
+                var startTime = new Date().getTime();
+
+                evoLisa.start(function() {      
+                    // update generation
                     genOutput.innerHTML = evoLisa.generation;
-                    console.log(evoLisa.dna.fit / evoLisa.initialFitness)
-                    if (evoLisa.dna.fit / evoLisa.initialFitness < currentPercentage) {
+                    fitOutput.innerHTML = evoLisa.dna.fit;
+                    polyOutput.innerHTML = evoLisa.dna.dna.length;
+                    // shall we display another snapshot?
+                    if (evoLisa.generation % 500 == 0) {
                         displayEvolution(evoLisa, startTime);
-                        fitOutput.innerHTML = evoLisa.dna.fit;
-                        currentPercentage -= displayEveryPercentage;
-                    }
-
-                    setTimeout(steps, 1)
-                }
-                steps();
-            };
-
-            var workers = document.getElementById('workers');
-            workers.onclick = function() {
-                evoLisa = go();
-                var startTime = new Date().getTime()
-                evoLisa.start(function() {
-                    
-                        genOutput.innerHTML = evoLisa.generation;
-                    if (evoLisa.dna.fit / evoLisa.initialFitness < currentPercentage) {
-                        displayEvolution(evoLisa, startTime);
-                        fitOutput.innerHTML = evoLisa.dna.fit;
-                        currentPercentage -= displayEveryPercentage;
                     }
                 });
             };
 
-            var step = document.getElementById('step');
-            step.onclick = function() {
-                if (typeof evoLisa == "undefined") {
-                    evoLisa = go();
-                }
-                for (var i=0; i<250; i++)
-                    evoLisa.step();
+            stop.onclick = function() {
+                evoLisa.stop();
             };
 
-            // setup testing mutations
-            var add_poly = document.getElementById('add_poly');
-            add_poly.onclick = function() {
-                if (typeof evoLisa == "undefined") {
-                    evoLisa = go();
-                    evoLisa.start();
-                }
-
-                evoLisa.dna.addPolygon();
-                evoLisa.draw();
+            reset.onclick = function() {
+                evoLisa.stop();
+                evoLisa = go();
+                start.click();
+                display.innerHTML = '';
             };
         </script>
     </body>

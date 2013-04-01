@@ -1,7 +1,9 @@
 var EvoLisa = function(target, canvas) {
     "use strict"
     this.t = target;    // image we're mutating towards
-    this.c = canvas;    // canva we're drawing on
+    this.c = canvas;    // canvas we're drawing on
+    this.running = false;
+    this.initialFitness = undefined;
 
     // ensure our canvas matches the target
     this.c.width = this.c.style.width = this.t.width;
@@ -16,8 +18,17 @@ var EvoLisa = function(target, canvas) {
 
     this.tData = utils.getImagePixelData(this.t);
     this.dna = new Dna(this.settings);
-
     this.generation = 0;
+
+    //start with a black background
+    var poly = new Polygon(),
+        p1 = new Point(0, 0),
+        p2 = new Point(0, this.t.height),
+        p3 = new Point(this.t.width, this.t.height),
+        p4 = new Point(this.t.width, 0);
+    poly.points = [p1, p2, p3, p4];
+    poly.color = "rgba(255,255,255,1)";
+    this.dna.dna.push(poly);
 };
 
 EvoLisa.prototype.start = function(callback) {
@@ -25,54 +36,47 @@ EvoLisa.prototype.start = function(callback) {
         Entry point for evolution with web workers
     */
     "use strict"
+    this.running = true;
     this.dna.mutate();
     var self = this;
-    this.dna.fitness_workers(this.tData, function() {
-        self.initialFitness = this.fit;
-        self.step_workers(callback);
+    this.dna.fitness(this.tData, function() {
+        self.initialFitness = self.dna.fit;
+        self.step(callback);
     });
 };
 
-EvoLisa.prototype.step_workers = function(callback) {
+EvoLisa.prototype.stop = function() {
+    /*
+        stop the mutations 
+    */
+    "use strict"
+    this.running = false;
+    WORKER = undefined;
+};
+
+EvoLisa.prototype.step = function(callback) {
     /*
         Step function for web workes, sets up call backs
     */
-    var child = utils.deepCopy(this.dna);
-    child.mutate();
-    var self = this;
+    "use strict"
+    if (this.running) {
+        var child = utils.deepCopy(this.dna);
+        child.mutate();
+        var self = this;
 
-    child.fitness_workers(this.tData, function() {
-        if (child.fit < self.dna.fit) {
-            self.dna = child;
-            self.draw();
-        }
-        self.generation++;
+        child.fitness(this.tData, function() {
+            if (child.fit < self.dna.fit) {
+                self.dna = child;
+                self.draw();
+            }
+            self.generation++;
 
-        if (typeof callback == "function")
+            if (typeof callback == "function")
                 callback();
 
-        self.step_workers(callback);
-    });
-};
-
-EvoLisa.prototype.step = function() {
-    /*
-        Each step allows for a mutation
-    */
-    "use strict"
-    var child = utils.deepCopy(this.dna);
-    child.mutate();
-
-
-    if (child.fitness(this.tData) < this.dna.fitness(this.tData)) {
-        this.dna = child;
-        this.draw();
+            self.step(callback);
+        });
     }
-
-    if (this.generation == 0)
-        this.initialFitness = this.dna.fitness(this.tData);
-
-    this.generation++;
 };
 
 EvoLisa.prototype.draw = function(c) {
@@ -90,7 +94,12 @@ EvoLisa.prototype.draw = function(c) {
 
 */
 
-var Mutation = function(probability, mutate, isValid) {
+var Mutation = function(name, probability, mutate, isValid) {
+    /*
+        Create a common interface for the mutations
+    */
+    "use strict"
+    this.name = name;
     this.probability = probability;
     this.mutate = mutate;
     this.isValid = isValid;
@@ -101,27 +110,34 @@ var Mutation = function(probability, mutate, isValid) {
 
 */
 var Dna = function (settings) {
+    /*
+        DNA constructor 
+    */
     "use strict"
-    this.dna = [];      // contains polygon information
+    this.dna = [];
     this.max_polygon = settings["max_polygon"];
     this.max_polygon_points = settings["max_polygon_points"];
     this.max_width = settings["max_width"];
     this.max_height = settings["max_height"];
 
     this.dnaMutations = [
-        new Mutation(1/700, Dna.prototype.addPolygon, Dna.prototype.addPolygon_valid),
-        new Mutation(1/700, Dna.prototype.movePolygon, Dna.prototype.movePoint_valid),
-        new Mutation(1/1500, Dna.prototype.removePolygon, Dna.prototype.removePolygon_valid)
+        new Mutation("addPoly", 1/700, Dna.prototype.addPolygon, Dna.prototype.addPolygon_valid),
+        new Mutation("movePoly", 1/700, Dna.prototype.movePolygon, Dna.prototype.movePoint_valid),
+        new Mutation("removePoly", 1/1500, Dna.prototype.removePolygon, Dna.prototype.removePolygon_valid)
     ];
 
     this.polygonMutations = [
-        new Mutation(1/1500, Dna.prototype.addPoint, Dna.prototype.addPoint_valid),
-        new Mutation(1/1500, Dna.prototype.removePoint, Dna.prototype.removePoint_valid),
-        new Mutation(1/1500, Dna.prototype.movePoint, Dna.prototype.movePoint_valid),
-        new Mutation(1/1500, Dna.prototype.recolourRed, Dna.prototype.recolour_valid),
-        new Mutation(1/1500, Dna.prototype.recolourGreen, Dna.prototype.recolour_valid),
-        new Mutation(1/1500, Dna.prototype.recolourBlue, Dna.prototype.recolour_valid),
-        new Mutation(1/1500, Dna.prototype.recolourAlpha, Dna.prototype.recolour_valid)
+        new Mutation("addPoint", 1/1500, Dna.prototype.addPoint, Dna.prototype.addPoint_valid),
+        new Mutation("removePoint", 1/1500, Dna.prototype.removePoint, Dna.prototype.removePoint_valid),
+        new Mutation("movePoint", 1/1500, Dna.prototype.movePoint, Dna.prototype.movePoint_valid),
+        new Mutation("recolour", 1/1500, Dna.prototype.recolour, Dna.prototype.recolour_valid),
+
+        /*
+        new Mutation("recolourRed", 1/1500, Dna.prototype.recolourRed, Dna.prototype.recolour_valid),
+        new Mutation("recolourGreen", 1/1500, Dna.prototype.recolourGreen, Dna.prototype.recolour_valid),
+        new Mutation("recolourBlue", 1/1500, Dna.prototype.recolourBlue, Dna.prototype.recolour_valid),
+        new Mutation("recolourAlpha", 1/1500, Dna.prototype.recolourAlpha, Dna.prototype.recolour_valid)
+        */
     ];
 };
 
@@ -138,32 +154,7 @@ Dna.prototype.draw = function(c) {
 
 Dna.prototype.getFitnessWorker = function() {
     /*
-        To speed up the fitness function we can split the data to multiple workers
-    */
-    "use strict"
-    var blob = new Blob([
-        "                                                               \
-        self.onmessage = function(e) {                                  \
-            var fit = 0,                                                \
-                p = 0,                                                  \
-                numParitions = e.data.numParitions,                     \
-                partition = e.data.partition,                           \
-                stepSize = 4 * (numParitions / 3);                      \
-            for (var i=partition; i<e.data.tData.length; i+=stepSize) { \
-                p = e.data.tData[i] - e.data.cData[i];                  \
-                fit += p*p;                                             \
-            }                                                           \
-            self.postMessage({fit: fit});                               \
-        }                                                               \
-        "
-    ]);
-    var blobURL = window.URL.createObjectURL(blob);
-    return new Worker(blobURL);
-};
-
-Dna.prototype.getFitnessWorker_basic = function() {
-    /*
-        To speed up the fitness function we can split the data to multiple workers
+        Worker to process the fitness (potential speed increase here by splitting the work?)
     */
     "use strict"
     var blob = new Blob([
@@ -179,7 +170,7 @@ Dna.prototype.getFitnessWorker_basic = function() {
                 var b = tData[i+2] - cData[i+2];                        \
                 fit += r*r + g*g + b*b;                                 \
             }                                                           \
-            self.postMessage({fit: fit});                               \
+            self.postMessage(fit);                                      \
         }                                                               \
         "
     ]);
@@ -187,43 +178,26 @@ Dna.prototype.getFitnessWorker_basic = function() {
     return new Worker(blobURL);
 };
 
-var WORKERS = undefined;
+// web woker that we'll be using to do all our grunt work
+var WORKER = undefined;
 
-Dna.prototype.fitness_workers = function(tData, workersComplete) {
+Dna.prototype.fitness = function(tData, workersComplete) {
     /*
-
+        Get a web worker to comput the fitness, better ui
     */
-    var NUM_WORKERS = 3,
-        self = this;
+    "use strict"
+    var self = this;
 
-    this.workersWaiting = NUM_WORKERS;
-
-    if (typeof WORKERS === "undefined") {
-        WORKERS = [];
-        for (var i=0; i<NUM_WORKERS; i++) {
-            var w = this.getFitnessWorker()
-            WORKERS.push(w);
-        }
+    if (typeof WORKER === "undefined") {
+        WORKER = this.getFitnessWorker();
     }
 
-    max = 0;
-
-    WORKERS.forEach(function(worker) {
-        worker.onmessage = function(e) {
-            self.workersWaiting--;
-            self.fit = self.fit ? self.fit + e.data.fit : e.data.fit;
-            var delta = new Date().getTime() - e.data.y;
-            if (delta > max) {
-                max = delta
-                //console.log(max);
-            }
-
-            if (self.workersWaiting == 0) {
-                if (typeof workersComplete === "function")
-                    workersComplete.apply(self);
-            }
-        };
-    });
+    
+    WORKER.onmessage = function(e) {
+        self.fit = e.data;
+        if (typeof workersComplete === "function")
+            workersComplete.apply(self);
+    }
 
     var c = document.createElement('canvas');
     c.width = c.style.width = this.max_width;
@@ -232,88 +206,10 @@ Dna.prototype.fitness_workers = function(tData, workersComplete) {
     this.draw(c);
 
     var ctx = c.getContext('2d'),
-        fit = 0,
         cData = ctx.getImageData(0, 0, this.max_width, this.max_height).data;
 
-    // pass the full set of data to each worker, they can then sort through which segment they're doing
-    for (var i=0; i<NUM_WORKERS; i++) {
-        data = {tData: tData, cData: cData, partition: i, numParitions: NUM_WORKERS};
-        WORKERS[i].postMessage(data);
-    }
-};
-
-Dna.prototype.fitness_workers_basic = function(tData, workersComplete) {
-    var NUM_WORKERS = 1,
-        self = this;
-
-    this.workersWaiting = NUM_WORKERS;
-
-    if (typeof WORKERS === "undefined") {
-        WORKERS = [];
-        for (var i=0; i<NUM_WORKERS; i++) {
-            var w = this.getFitnessWorker()
-            WORKERS.push(w);
-        }
-    }
-
-    WORKERS.forEach(function(worker) {
-        worker.onmessage = function(e) {
-            self.workersWaiting--;
-            self.fit = self.fit ? self.fit + e.data.fit : e.data.fit;
-            if (self.workersWaiting == 0) {
-                if (typeof workersComplete === "function")
-                    workersComplete.apply(self);
-            }
-        };
-    });
-
-    var c = document.createElement('canvas');
-    c.width = c.style.width = this.max_width;
-    c.height = c.style.height = this.max_height;
-
-    this.draw(c);
-
-    var ctx = c.getContext('2d');
-    var fit = 0;
-    var cData = ctx.getImageData(0, 0, this.max_width, this.max_height).data;
-
-    data = {tData: tData, cData: cData};
-    WORKERS[0].postMessage(data);
-};
-
-Dna.prototype.fitness = function(tData) {
-    /*
-        Determine the "fitness" of our current DNA string
-    */
-    "use strict"
-
-    // check if we've cached this fitness already
-    if (this.fit)
-        return this.fit;
-
-    var c = document.createElement('canvas');
-    c.width = c.style.width = this.max_width;
-    c.height = c.style.height = this.max_height;
-
-    this.draw(c);
-
-    var ctx = c.getContext('2d');
-    var fit = 0;
-    var cData = ctx.getImageData(0, 0, this.max_width, this.max_height).data;
-    for (var i=0; i<cData.length; i+=4) {
-        //red
-        var r = tData[i] - cData[i];
-        //green
-        var g = tData[i+1] - cData[i+1];
-        //blue
-        var b = tData[i+2] - cData[i+2];
-
-        //the fourth element represents alpha, which we don't care about
-
-        fit += r*r + g*g + b*b;
-    }
-    this.fit = fit;
-    return fit;
+    // go!
+    WORKER.postMessage({tData: tData, cData: cData});
 };
 
 Dna.prototype.mutate = function() {
@@ -352,6 +248,7 @@ Dna.prototype.addPolygon = function() {
     /*
         Adds a randomly generated polygon to our DNA, either at specified index or at the end
     */
+    "use strict"
     var poly = new Polygon(),  // polygon we'll be adding
         num_points_add = utils.random(this.max_polygon_points - 3); // we know we need at least 3 points, so look for the number we can have above that
 
@@ -410,10 +307,19 @@ Dna.prototype.removePolygon_valid = function() {
     return this.dna.length > 0;
 };
 
+Dna.prototype.recolour = function(index) {
+    /*
+        only case we can't recolour is when we don't actually have any polygons 
+    */
+    "use strict"
+    this.dna[index].color = utils.randomColorAlpha(Math.random());
+};
+
 Dna.prototype.recolour_valid = function() {
     /*
         only case we can't recolour is when we don't actually have any polygons 
     */
+    "use strict"
     return this.dna.length > 0;
 };
 
@@ -632,17 +538,5 @@ var utils = {
             return out;
         }
         return obj;
-    },
-    getNElements: function(arr, n) {
-        if ( n === 1 ) return arr.slice();
-        var i, j,
-            len = arr.length,
-            ret = [];
-        for ( i = 0; i < n; i++ ) {
-            for ( j = i; j < len; j += n ) {
-                ret.push( arr[ j ] );
-            }
-        }
-        return ret;
     }
 };
